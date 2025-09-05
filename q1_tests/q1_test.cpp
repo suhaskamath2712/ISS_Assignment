@@ -1,6 +1,20 @@
 #include <bits/stdc++.h>
 #include "../user_code.h"   // your function is here
+#include <sys/resource.h>  // getrusage
+#include <unistd.h>        // getpid
+
 using namespace std;
+
+// Helper to get current memory usage in KB (resident set size)
+long getMemoryUsageKB() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+#if defined(__APPLE__) && defined(__MACH__)
+    return usage.ru_maxrss / 1024; // macOS reports bytes
+#else
+    return usage.ru_maxrss;        // Linux reports KB
+#endif
+}
 
 // Helper: parse string like "[[1, 10], [2, 5]]" -> vector<vector<int>>
 vector<vector<int>> parse_parcels(const string& s) {

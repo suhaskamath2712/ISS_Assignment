@@ -21,9 +21,9 @@ def plot_data_3d(x: List[int], y: List[int], z: List[int]):
     ax = fig.add_subplot(111, projection='3d')
     fxy = []
     for i in range(len(x)):
-        fxy.append(8 * max(x[i], y[i]) * np.log(x[i]))
+        fxy.append(0.5 * max(x[i], y[i]) * np.log(x[i]))
     ax.scatter(x, y, z, color = 'blue', label='Data points')
-    ax.scatter(x, y, fxy, color = 'orange', label='Reference points')
+    ax.scatter(x, y, fxy, color = 'orange', label='Reference points z = (0.5 * max(x, y) * log(x))')
     ax.set_title('3D Timing Plot')
     ax.set_xlabel('Number of Nodes')
     ax.set_ylabel('Number of Edges')

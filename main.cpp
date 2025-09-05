@@ -108,11 +108,11 @@ void question3(string input_file, string output_file)
 
 int main(int argc, char **argv)
 {
-    string question1_input_file = "C:\\Users\\suhas\\Downloads\\ISS_Assignment\\ds221-2025\\sample_tests\\question1\\input.txt";
+    string question1_input_file = "input1.txt";
     string question1_output_file = "question1_output.txt";
-    string question2_input_file = "C:\\Users\\suhas\\Downloads\\ISS_Assignment\\ds221-2025\\sample_tests\\question2\\input.txt";
+    string question2_input_file = "input2.txt";
     string question2_output_file = "question2_output.txt";
-    string question3_input_file = "C:\\Users\\suhas\\Downloads\\ISS_Assignment\\ds221-2025\\sample_tests\\question3\\input.txt";
+    string question3_input_file = "input3.txt";
     string question3_output_file = "question3_output.txt";
     
     /*

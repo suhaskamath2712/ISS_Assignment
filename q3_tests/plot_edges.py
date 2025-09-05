@@ -16,12 +16,11 @@ def read_csv(file_path: str) -> Tuple[List[int], List[int]]:
 
 def plot_data(x: List[int], y: List[int]):
     plt.scatter(x, y, label='Data points')
-    fx = [10 * i * np.log(i) for i in x]
-    plt.scatter(x, fx, color='orange', label='y = x log(x)')
     plt.title('Timing Plot')
     plt.xlabel('Number of Edges')
     plt.ylabel('Time (μs)')
     plt.legend()
+    plt.grid(True)
     plt.show()
 
 print("Starting plot script.")
