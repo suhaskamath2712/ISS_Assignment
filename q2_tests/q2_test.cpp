@@ -1,6 +1,19 @@
 #include <bits/stdc++.h>
 #include "../user_code.h"
+#include <sys/resource.h>  // getrusage
+#include <unistd.h>        // getpid
 using namespace std;
+
+// Helper to get current memory usage in KB (resident set size)
+long getMemoryUsageKB() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+#if defined(__APPLE__) && defined(__MACH__)
+    return usage.ru_maxrss / 1024; // macOS reports bytes
+#else
+    return usage.ru_maxrss;        // Linux reports KB
+#endif
+}
 
 // Utility: safely parse a list from a string like "[1,2,3]"
 vector<int> parse_int_list(const string &s) {
@@ -105,7 +118,7 @@ int main() {
     getline(fin_inputs, line_in);  // skip header
     getline(fin_outputs, line_out);
 
-    fout << "num_nodes,num_queries,time_microseconds,correct\n";
+    fout << "num_nodes,num_queries,time_microseconds,memory_kb,correct\n";
 
     int case_num = 0;
     while (getline(fin_inputs, line_in) && getline(fin_outputs, line_out)) {
@@ -125,18 +138,25 @@ int main() {
         // Expected output
         vector<int> expected = parse_int_list(line_out);
 
-        // Run & time
-        auto queries_copy = queries; // pass by value
-        auto start = chrono::high_resolution_clock::now();
-        vector<int> got = question_two(preorder, inorder, leafParcels, queries_copy);
-        auto end = chrono::high_resolution_clock::now();
-        long long elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
+    // Measure memory before, run & time, then measure memory after
+    long mem_before = getMemoryUsageKB();
+
+    auto queries_copy = queries; // pass by value
+    auto start = chrono::high_resolution_clock::now();
+    vector<int> got = question_two(preorder, inorder, leafParcels, queries_copy);
+    auto end = chrono::high_resolution_clock::now();
+
+    long mem_after = getMemoryUsageKB();
+    long mem_used = mem_after - mem_before;
+    if (mem_used < 0) mem_used = 0;
+
+    long long elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
 
         // Compare
         bool correct = (got == expected);
 
         // Write result
-        fout << preorder.size() << "," << queries.size() << "," << elapsed << "," << (correct ? "1" : "0") << "\n";
+    fout << preorder.size() << "," << queries.size() << "," << elapsed << "," << mem_used << "," << (correct ? "1" : "0") << "\n";
     }
 
     cout << "Finished Q2 testing. Results in q2_timings.csv\n";

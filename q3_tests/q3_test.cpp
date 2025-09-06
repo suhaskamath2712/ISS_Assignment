@@ -1,5 +1,7 @@
 #include <bits/stdc++.h>
 #include "../user_code.h"
+#include <sys/resource.h>  // getrusage
+#include <unistd.h>        // getpid
 using namespace std;
 
 // Utility: parse list of integers from string "[1,2,3]"
@@ -62,6 +64,17 @@ string extract_section(const string &input_str, const string &key) {
     return input_str.substr(start, end - start + 1);
 }
 
+// Helper to get current memory usage in KB (resident set size)
+long getMemoryUsageKB() {
+    struct rusage usage;
+    getrusage(RUSAGE_SELF, &usage);
+#if defined(__APPLE__) && defined(__MACH__)
+    return usage.ru_maxrss / 1024; // macOS reports bytes
+#else
+    return usage.ru_maxrss;        // Linux reports KB
+#endif
+}
+
 int main() {
     ifstream fin_inputs("q3_inputs.csv");
     ifstream fin_outputs("q3_outputs.csv");
@@ -76,7 +89,7 @@ int main() {
     getline(fin_inputs, line_in); // skip headers
     getline(fin_outputs, line_out);
 
-    fout << "num_nodes,num_edges,num_metros,time_microseconds,correct\n";
+    fout << "num_nodes,num_edges,num_metros,time_microseconds,memory_kb,correct\n";
 
     int case_num = 0;
     while (getline(fin_inputs, line_in) && getline(fin_outputs, line_out)) {
@@ -95,17 +108,24 @@ int main() {
         // Expected output
         long long expected = stoll(line_out);
 
-        // Run & time
-        auto start = chrono::high_resolution_clock::now();
-        long long got = question_three(edges, metro_cities);
-        auto end = chrono::high_resolution_clock::now();
-        long long elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
+    // Measure memory before, run & time, then measure memory after
+    long mem_before = getMemoryUsageKB();
+
+    auto start = chrono::high_resolution_clock::now();
+    long long got = question_three(edges, metro_cities);
+    auto end = chrono::high_resolution_clock::now();
+
+    long mem_after = getMemoryUsageKB();
+    long mem_used = mem_after - mem_before;
+    if (mem_used < 0) mem_used = 0;
+
+    long long elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
 
         int n = 0;
         for (auto &e : edges) n = max(n, max(e[0], e[1]));
 
         bool correct = (got == expected);
-        fout << n << "," << edges.size() << "," << metro_cities.size() << "," << elapsed << "," << (correct ? "1" : "0") << "\n";
+    fout << n << "," << edges.size() << "," << metro_cities.size() << "," << elapsed << "," << mem_used << "," << (correct ? "1" : "0") << "\n";
     }
 
     cout << "Finished Q3 testing. Results in q3_timings.csv\n";

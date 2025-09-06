@@ -66,7 +66,7 @@ int main() {
     getline(fin_inputs, line_in);  // skip header
     getline(fin_outputs, line_out);
 
-    fout << "num_parcels,time_microseconds,correct\n";
+    fout << "num_parcels,time_microseconds,memory_kb,correct\n";
 
     int case_num = 0;
     while (getline(fin_inputs, line_in) && getline(fin_outputs, line_out)) {
@@ -86,10 +86,16 @@ int main() {
         vector<vector<int>> parcels = parse_parcels(input_str);
         vector<vector<int>> expected = parse_parcels(expected_str);
 
-        // Run and time
+        // Measure memory before, run and time, then measure memory after
+        long mem_before = getMemoryUsageKB();
+
         auto start = chrono::high_resolution_clock::now();
         vector<vector<int>> got = question_one(parcels);
         auto end = chrono::high_resolution_clock::now();
+
+        long mem_after = getMemoryUsageKB();
+        long mem_used = mem_after - mem_before;
+        if (mem_used < 0) mem_used = 0; // guard against odd ru_maxrss behavior
 
         long long elapsed =
             chrono::duration_cast<chrono::microseconds>(end - start).count();
@@ -97,8 +103,8 @@ int main() {
         // Compare
         bool correct = (got == expected);
 
-        // Write result
-        fout << parcels.size() << "," << elapsed << "," << (correct ? "1" : "0") << "\n";
+    // Write result (memory in KB)
+    fout << parcels.size() << "," << elapsed << "," << mem_used << "," << (correct ? "1" : "0") << "\n";
 
         cout << "Completed test no. " << case_num << endl;
     }

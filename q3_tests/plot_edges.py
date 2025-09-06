@@ -16,6 +16,8 @@ def read_csv(file_path: str) -> Tuple[List[int], List[int]]:
 
 def plot_data(x: List[int], y: List[int]):
     plt.scatter(x, y, label='Data points')
+    fx = [1.5 * i for i in x]
+    plt.scatter(x, fx, color='orange', label='y = 1.5 * x')
     plt.title('Timing Plot')
     plt.xlabel('Number of Edges')
     plt.ylabel('Time (μs)')

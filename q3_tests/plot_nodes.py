@@ -22,6 +22,7 @@ def plot_data(x: List[int], y: List[int]):
     plt.xlabel('Number of Nodes')
     plt.ylabel('Time (μs)')
     plt.legend()
+    plt.grid(True)
     plt.show()
 
 print("Starting plot script.")
