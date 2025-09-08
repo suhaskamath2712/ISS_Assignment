@@ -87,14 +87,14 @@ int main() {
         vector<vector<int>> expected = parse_parcels(expected_str);
 
         // Measure memory before, run and time, then measure memory after
-        long mem_before = getMemoryUsageKB();
+        // long mem_before = getMemoryUsageKB();
 
         auto start = chrono::high_resolution_clock::now();
         vector<vector<int>> got = question_one(parcels);
         auto end = chrono::high_resolution_clock::now();
 
-        long mem_after = getMemoryUsageKB();
-        long mem_used = mem_after - mem_before;
+        // long mem_after = getMemoryUsageKB();
+        long mem_used = getMemoryUsageKB();
         if (mem_used < 0) mem_used = 0; // guard against odd ru_maxrss behavior
 
         long long elapsed =

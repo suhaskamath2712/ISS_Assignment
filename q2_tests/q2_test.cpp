@@ -138,16 +138,12 @@ int main() {
         // Expected output
         vector<int> expected = parse_int_list(line_out);
 
-    // Measure memory before, run & time, then measure memory after
-    long mem_before = getMemoryUsageKB();
-
     auto queries_copy = queries; // pass by value
     auto start = chrono::high_resolution_clock::now();
     vector<int> got = question_two(preorder, inorder, leafParcels, queries_copy);
     auto end = chrono::high_resolution_clock::now();
 
-    long mem_after = getMemoryUsageKB();
-    long mem_used = mem_after - mem_before;
+    long mem_used = getMemoryUsageKB();
     if (mem_used < 0) mem_used = 0;
 
     long long elapsed = chrono::duration_cast<chrono::microseconds>(end - start).count();
