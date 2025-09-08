@@ -25,11 +25,11 @@ def plot_data_time(x: List[int], y: List[int]):
     plt.grid(True)
     plt.show()
 
-def plot_data_memory(x: List[int], z: List[int]):
-    plt.scatter(x, z, label='Data points')
-    plt.scatter(x, x, label='Reference points y = x', color='orange')
+def plot_data_memory(z: List[int]):
+    plt.plot(range(0, len(z)), z, label='Data points')
+    #plt.scatter(x, x, label='Reference points y = x', color='orange')
     plt.title('Memory Plot')
-    plt.xlabel('Number of parcels')
+    plt.xlabel('Test #')
     plt.ylabel('Memory (KB)')
     plt.legend()
     plt.grid(True)
@@ -39,4 +39,4 @@ print("Starting plot script.")
 x, y, z = read_csv("q1_tests/q1_timings.csv")
 print("Printing graph.")
 plot_data_time(x, y)
-plot_data_memory(x, z)
+plot_data_memory(z)
