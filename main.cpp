@@ -108,12 +108,15 @@ void question3(string input_file, string output_file)
 
 int main(int argc, char **argv)
 {
+    /*
     string question1_input_file = "input1.txt";
     string question1_output_file = "question1_output.txt";
     string question2_input_file = "input2.txt";
     string question2_output_file = "question2_output.txt";
-    string question3_input_file = "input3.txt";
-    string question3_output_file = "question3_output.txt";
+    */
+
+    string question3_input_file = "question3_edgecase.txt";
+    string question3_output_file = "question3_edgecase_output.txt";
     
     /*
     string question1_input_file = argv[1];
@@ -124,10 +127,12 @@ int main(int argc, char **argv)
     string question3_output_file = argv[6];
     */
 
+    /*
     question1(question1_input_file, question1_output_file);
 
     question2(question2_input_file, question2_output_file);
-
+    */
+   
     question3(question3_input_file, question3_output_file);
 
     return 0;
