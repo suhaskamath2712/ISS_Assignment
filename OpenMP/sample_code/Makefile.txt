@@ -1,0 +1,13 @@
+CC=gcc
+
+all: test-openmp
+
+test-openmp: test-openmp.o
+	$(CC) -fopenmp -o test-openmp test-openmp.o
+
+test-openmp.o: test-openmp.c
+	$(CC) -fopenmp -o test-openmp.o -c test-openmp.c
+
+clean:
+	rm -f test-openmp.o test-openmp
+

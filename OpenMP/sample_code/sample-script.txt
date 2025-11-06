@@ -1,0 +1,10 @@
+#!/bin/bash
+#SBATCH --job-name=myjob               # Job name
+#SBATCH --nodes=1                      # Number of nodes
+#SBATCH --ntasks=1                     # Total number of tasks
+#SBATCH --cpus-per-task=1              # Number of CPU cores per task
+#SBATCH --output=output.log            # Output file
+#SBATCH --error=error.log              # Error log file
+
+cd /scratch/OpenMp                   # Change to the submission directory
+./test-openmp                          # Run the OpenMP executable
