@@ -4,7 +4,7 @@
 CC      ?= gcc
 CSTD    ?= c11
 CFLAGS  ?= -O2 -Wall -Wextra -pedantic -std=$(CSTD)
-LDFLAGS ?=
+LDFLAGS ?= -fopenmp
 LDLIBS  ?= -lm
 
 # Sources and targets

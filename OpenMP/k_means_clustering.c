@@ -1,61 +1,64 @@
 /**
  * k_means_clustering.c
- * ----------------------------------------
- * Minimal C implementation of k-means clustering for 2D integer points.
+ * -----------------------------------------------------------------------------
+ * Parallel (OpenMP) implementation of Lloyd's k-means for 2D integer points.
  *
- * INPUT DATA SOURCE:
- * A CSV file (no header) where each line contains two comma-separated integers:
- * x,y\n
- * Example:
- * 10,42
- * -3,17
+ * INPUT FORMAT:
+ *   CSV file (no header) with lines:  x,y\n  (both integers). Example:
+ *       10,42
+ *       -3,17
+ *   File path configured via FILE_NAME.
  *
- * HIGH-LEVEL ALGORITHM (STANDARD LLOYD'S):
- * 1. Initialize K centroids (here: first K points; can be improved via k-means++).
- * 2. Repeat for up to MAX_ITERATIONS (early stop enabled):
- * a. ASSIGNMENT: For each point, choose the nearest centroid by squared Euclidean distance.
- * b. UPDATE: Recompute each centroid as the arithmetic mean of points assigned to it.
- * 3. Stop early if average centroid movement is about 0 (convergence threshold).
+ * ALGORITHM (LLOYD'S):
+ *   1. Initialize K centroids (first K points; can substitute k-means++).
+ *   2. Repeat until convergence or MAX_ITERATIONS:
+ *        a. ASSIGNMENT (parallel): assign each point to nearest centroid.
+ *        b. ACCUMULATION (parallel): per-thread local sums merged into global.
+ *        c. UPDATE: compute new centroid means.
+ *        d. MOVEMENT CHECK (parallel reduction): compute average Euclidean movement;
+ *           stop early if movement < EPSILON.
  *
- * PERFORMANCE NOTES:
- * - Time per iteration: O(N * K) distance computations.
- * - Memory: O(N) for points + O(K) for centroids + O(N) for assignments.
- * - Uses squared distance to avoid unnecessary sqrt calls (monotonic w.r.t actual distance).
+ * PARALLELIZATION STRATEGY:
+ *   - Accumulation: each thread uses stack-local arrays (local_sums/local_counts) to avoid
+ *     contention; merged once inside a critical region (O(K) merge per thread).
+ *   - Movement: reduction over centroid indices using OpenMP reduction clause.
+ *   - Thread count configurable via argv[1]; validated >=1; passed to omp_set_num_threads.
  *
- * LIMITATIONS / POSSIBLE IMPROVEMENTS:
- * - Early stopping uses an average-movement threshold.
- * - No k-means++ initialization (can reduce iterations / improve clustering quality).
- * - Centroids chosen from first K points may cause degenerate clusters if early points are close.
- * - No handling for empty input or when num_points < K beyond using those points as initial centroids.
- * - Integer division during centroid update may introduce rounding bias (consider storing doubles).
+ * COMPLEXITY:
+ *   Sequential theoretical: O(T * N * K) distance ops, T <= MAX_ITERATIONS.
+ *   Parallel ideal runtime: O(T * (N/threads) * K) + merge overhead O(threads * K).
+ *   Memory: O(N) points + O(N) assignments + O(K) centroids + O(K) temporary arrays per thread.
  *
- * EDGE CASES CONSIDERED:
- * - File open failure.
- * - Dynamic growth of point array with realloc.
- * - Empty cluster in update step: centroid left unchanged.
+ * CONVERGENCE:
+ *   Uses average centroid movement threshold (EPSILON). Movement is averaged Euclidean
+ *   distance across centroids after each iteration.
  *
- * BUILDING:
- * gcc -O2 -std=c11 k_means_clustering.c -o kmeans -lm
- * (Note: Added -lm to link the math library for sqrt)
+ * EDGE CASES:
+ *   - num_points < K -> program aborts early with message.
+ *   - Empty cluster: centroid remains at previous position (no reinitialization strategy).
  *
+ * OUTPUT:
+ *   Final runtime (ms) and optionally centroid coordinates (printing suppressed if unwanted).
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <string.h> // Added for memcpy
+#include <string.h>
+#include <omp.h>
 
-// File to read data from (relative path). Adjust as needed.
+// File to read data from 
 #define FILE_NAME "data_20k.csv"
 
-// Number of clusters (K). Ensure K <= number of points for robust initialization.
+// Number of clusters 
 #define K 20
 
-// Maximum number of iterations for Lloyd's refinement phase.
+// Maximum number of iterations 
 #define MAX_ITERATIONS 100
 
 // Convergence threshold (in average centroid movement, Euclidean units).
 // When avg movement < EPSILON, iterations stop early.
-#define EPSILON 0.01
+#define EPSILON 0.0001
 
 #define NO_OF_POINTS 20000
 
@@ -75,11 +78,11 @@ typedef struct {
     int y;
 } Point;
 
+int number_of_threads = 1; // configurable via argv; passed to OpenMP runtime
+
 /**
  * read_csv
  * ----------------------------------------
- * Dynamically reads points from a CSV file of the form: "x,y" per line.
- * Allocates (or reallocates) an array of Point and returns its size.
  *
  * PARAMETERS:
  * filename  - path to CSV file.
@@ -87,9 +90,6 @@ typedef struct {
  *
  * RETURNS:
  * Number of points read (>=0), or -1 on file open failure.
- *
- * MEMORY MANAGEMENT:
- * Caller is responsible for freeing *points.
  *
  * COMPLEXITY:
  * O(N) where N is number of lines / points.
@@ -110,17 +110,19 @@ int read_csv(const char* filename, Point** points)
     int capacity = NO_OF_POINTS;       // Initial capacity for dynamic array growth.
     int size = 0;
     *points = (Point*)malloc(capacity * sizeof(Point));
-    if (!*points) {
+    if (!*points)
+    {
         fclose(file);
         fprintf(stderr, "Memory allocation failed for points array\n");
         return -1;
     }
 
-    // Read until fscanf fails (EOF or malformed line). Lines not matching pattern are skipped.
-    while (fscanf(file, "%d,%d", &(*points)[size].x, &(*points)[size].y) == 2) {
+    // Read until EOF
+    while (fscanf(file, "%d,%d", &(*points)[size].x, &(*points)[size].y) == 2)
+    {
         size++;
         if (size >= capacity) {
-            capacity *= 2; // Doubling strategy keeps amortized reallocation cost low.
+            capacity *= 2; // If more space needed, double capacity
             Point* tmp = (Point*)realloc(*points, capacity * sizeof(Point));
             if (!tmp) {
                 fprintf(stderr, "Realloc failed when expanding to %d points\n", capacity);
@@ -136,30 +138,34 @@ int read_csv(const char* filename, Point** points)
     return size;
 }
 
-
 /**
  * k_means
- * ----------------------------------------
- * Performs Lloyd's k-means clustering with early stopping (avg centroid movement).
+ * -----------------------------------------------------------------------------
+ * Parallel Lloyd's k-means with early stopping (average centroid movement).
  *
  * PARAMETERS:
- * points       - array of N points.
- * num_points   - number of points (N).
- * centroids    - array of size k; initialized on entry, updated in-place.
- * assignments  - output array of size N; after each iteration holds centroid index for each point.
+ *   points      : array of N points.
+ *   num_points  : number of points (N).
+ *   centroids   : array[K] (input initial positions, output final positions).
+ *   assignments : array[N] (written each iteration with cluster id per point).
  *
- * SIDE EFFECTS:
- * - Updates centroids in-place.
- * - Writes cluster assignment for each point into assignments.
+ * PARALLEL PHASES:
+ *   1. Assignment      (#pragma omp parallel for) per point nearest centroid.
+ *   2. Accumulation    (#pragma omp parallel) local arrays + critical merge.
+ *   3. Movement reduce (#pragma omp parallel for reduction(+)) total movement.
  *
  * COMPLEXITY:
- * O(ITERS * N * K) distance computations, where ITERS <= MAX_ITERATIONS.
+ *   Time: O(T * N * K / P + T * K * P) approx (P = threads, T iterations).
+ *   Space: O(N + K + K * P) due to per-thread local_sums/local_counts.
  *
- * EDGE CASES:
- * - Empty cluster: centroid remains as previous iteration value (no movement).
+ * CONVERGENCE:
+ *   Stops early if average movement < EPSILON; else runs to MAX_ITERATIONS.
+ *
+ * RETURNS:
+ *   void (centroids & assignments mutated in place).
  */
-void k_means(Point* points, int num_points, Point* centroids, int* assignments) {
-    
+void k_means(Point* points, int num_points, Point* centroids, int* assignments)
+{
     // Need a place to store old centroids to check for movement
     Point* old_centroids = (Point*)malloc(K * sizeof(Point));
     if (!old_centroids) {
@@ -168,29 +174,33 @@ void k_means(Point* points, int num_points, Point* centroids, int* assignments) 
     }
 
     for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
-        
-        // Store the current centroid positions *before* they are updated
+        // Store the current centroid positions before they are updated
         memcpy(old_centroids, centroids, K * sizeof(Point));
 
-        // ===================== ASSIGNMENT STEP =====================
-        // For each point, find the nearest centroid.
+        // ===================== ASSIGNMENT STEP (PARALLEL) =====================
+        // For each point, scan all centroids (K small relative to N). Writes to assignments[i].
+        // No synchronization required (each i unique). Static scheduling for cache locality.
+        #pragma omp parallel for schedule(dynamic) nowait
         for (int i = 0; i < num_points; i++) {
             int min_distance = SQUARED_DISTANCE(points[i], centroids[0]);
-            assignments[i] = 0;
+            int best = 0;
             for (int j = 1; j < K; j++) {
                 int distance = SQUARED_DISTANCE(points[i], centroids[j]);
                 if (distance < min_distance) {
                     min_distance = distance;
-                    assignments[i] = j;
+                    best = j;
                 }
             }
+            assignments[i] = best;
         }
 
-        // ===================== UPDATE STEP =====================
-        // Accumulate sums for each cluster to compute new centroids.
+        // ===================== UPDATE STEP (ALLOC GLOBAL BUFFERS) =====================
+        // Allocate global accumulation arrays (zeroed). Each thread will build local copies and merge.
         Point* new_centroids = (Point*)calloc(K, sizeof(Point));
         int* counts = (int*)calloc(K, sizeof(int));
-        if (!new_centroids || !counts) {
+
+        if (!new_centroids || !counts)
+        {
             fprintf(stderr, "Allocation failed during k-means update step\n");
             free(new_centroids);
             free(counts);
@@ -199,37 +209,63 @@ void k_means(Point* points, int num_points, Point* centroids, int* assignments) 
             return; 
         }
 
-        for (int i = 0; i < num_points; i++) {
-            new_centroids[assignments[i]].x += points[i].x;
-            new_centroids[assignments[i]].y += points[i].y;
-            counts[assignments[i]]++;
+        // ===================== ACCUMULATION STEP (PARALLEL LOCAL MERGE) =====================
+        // Each thread creates stack-local arrays to avoid false sharing & contention.
+        // Critical region merges O(K) per thread; acceptable for moderate K.
+        // Possible improvement: custom OpenMP reduction or atomic with padding.
+        #pragma omp parallel
+        {
+            Point local_sums[K];
+            int local_counts[K];
+
+            for (int c = 0; c < K; ++c)
+            {
+                local_sums[c].x = 0;
+                local_sums[c].y = 0;
+                local_counts[c] = 0;
+            }
+
+            #pragma omp for schedule(dynamic) nowait
+            for (int i = 0; i < num_points; i++) {
+                int cid = assignments[i];
+                local_sums[cid].x += points[i].x;
+                local_sums[cid].y += points[i].y;
+                local_counts[cid]++;
+            }
+
+            // Merge local into global (critical section per thread) to ensure correctness
+            #pragma omp critical
+            {
+                for (int c = 0; c < K; ++c) {
+                    new_centroids[c].x += local_sums[c].x;
+                    new_centroids[c].y += local_sums[c].y;
+                    counts[c] += local_counts[c];
+                }
+            }
         }
 
-        for (int j = 0; j < K; j++) {
+        // ===================== CENTROID UPDATE =====================
+        // Compute arithmetic mean; if empty cluster, leave centroid unchanged (no reinit strategy).
+        for (int j = 0; j < K; j++)
+        {
             if (counts[j] > 0) {
-                // Integer mean; consider casting to double for more precision if needed.
                 centroids[j].x = new_centroids[j].x / counts[j];
                 centroids[j].y = new_centroids[j].y / counts[j];
             }
-            // else: centroid remains in its 'old_centroid' position (no change)
         }
         
-        // Corrected calculation for average centroid movement
+        // ===================== MOVEMENT CALC (PARALLEL REDUCTION) =====================
+        // Sum Euclidean movement across centroids to gauge convergence.
         double total_movement = 0.0;
-        for (int j = 0; j < K; j++)
-        {
-            // Compare the NEW position (centroids[j]) with the OLD (old_centroids[j])
-            // Use sqrt to get actual Euclidean distance
+        #pragma omp parallel for reduction(+:total_movement) schedule(dynamic)
+        for (int j = 0; j < K; j++) {
             total_movement += sqrt(SQUARED_DISTANCE(centroids[j], old_centroids[j]));
         }
-        // Divide by K *after* the sum is complete
+        // Divide by K after the sum is complete
         double avg_movement = total_movement / K;
-
-        printf("Iteration %d, Average Centroid Movement: %.2f\n", iter + 1, avg_movement);
         
-        // Early stopping: stop when average movement is near zero
+        // Early stopping: break when average movement below EPSILON threshold.
         if (avg_movement < EPSILON) {
-            printf("Converged at iteration %d\n", iter + 1);
             free(new_centroids);
             free(counts);
             break; // Exit the loop early
@@ -245,20 +281,30 @@ void k_means(Point* points, int num_points, Point* centroids, int* assignments) 
 
 /**
  * main
- * ----------------------------------------
- * Driver program:
- * - Reads points from FILE_NAME.
- * - Initializes centroids with first K points.
- * - Allocates assignments array and runs k-means.
- * - Frees allocated memory.
+ * -----------------------------------------------------------------------------
  *
- * EXIT CODES:
- * 0 on success, 1 on failure to read data.
+ * STEPS:
+ *   1. Parse argv for thread count; set via omp_set_num_threads.
+ *   2. Read points from CSV.
+ *   3. Initialize centroids from first K points (for simplicity).
+ *   4. Time k_means via omp_get_wtime (wall clock).
+ *   5. Print runtime summary.
  *
- * NOTE:
- * Assumes num_points >= K; if not, some centroids may duplicate.
+ * RETURNS:
+ *   0 on success; 1 on I/O or allocation failure.
  */
-int main(void) {
+int main(int argc, char** argv)
+{
+    if (argc > 1)
+    {
+        number_of_threads = atoi(argv[1]);
+        if (number_of_threads < 1) number_of_threads = 1;
+    }
+    
+    omp_set_num_threads(number_of_threads);
+
+    double start, end; // wall-clock timing using OpenMP
+
     Point* points = NULL;
     int num_points = read_csv(FILE_NAME, &points);
 
@@ -266,8 +312,6 @@ int main(void) {
         fprintf(stderr, "Error reading points from CSV\n");
         return 1;
     }
-
-    printf("Read %d points from %s\n", num_points, FILE_NAME);
 
     // Check if K is too large (simple safeguard)
     if (num_points < K) {
@@ -279,26 +323,31 @@ int main(void) {
     // Initialize centroids (for simplicity, use first K points; better: random sample or k-means++).
     Point centroids[K];
 
-    for (int i = 0; i < K; i++) {
+    for (int i = 0; i < K; i++)
+    {
         centroids[i] = points[i];
     }
 
-    int* assignments = (int*)malloc(num_points * sizeof(int));
-    if (!assignments) {
+    int* assignments = (int*) malloc(num_points * sizeof(int));
+    if (!assignments)
+    {
         fprintf(stderr, "Failed to allocate assignments array\n");
         free(points);
         return 1;
     }
 
+    //Start clock
+    start = omp_get_wtime();
+
     // Run clustering (MAX_ITERATIONS internally controls loop count).
     k_means(points, num_points, centroids, assignments);
+    
+    //Stop clock
+    end = omp_get_wtime();
 
-    // Optional: Print final centroid locations
-    printf("\nFinal Centroid Locations:\n");
-    for(int i = 0; i < K; i++) {
-        printf("Cluster %d: (%d, %d)\n", i, centroids[i].x, centroids[i].y);
-    }
-
+    printf("K-means clustering completed in %.3f ms using %d thread(s).\n", (end - start) * 1000.0, number_of_threads);
+    
+    // Cleanup
     free(assignments);
     free(points);
     return 0;
