@@ -9,9 +9,14 @@
 #Compile, if not already done
 make
 
-#Run 5 times for each thread count
-for i in {1..5}; do ./kmeans_sequential; done            # Run the sequential executable
-for i in {1..5}; do ./kmeans_parallel 4; done            # Run the OpenMP executable with 4 threads
-for i in {1..5}; do ./kmeans_parallel 8; done            # Run the OpenMP executable with 8 threads
-for i in {1..5}; do ./kmeans_parallel 16; done           # Run the OpenMP executable with 16 threads
-for i in {1..5}; do ./kmeans_parallel 32; done           # Run the OpenMP executable with 32 threads
+#Run 5 times for each thread count - static scheduling
+for dynamic in 0 1
+do
+    for thread_count in 1 4 8 16 32
+    do
+        for i in {1..5}
+        do
+            ./kmeans_parallel $thread_count $dynamic
+        done
+    done
+done

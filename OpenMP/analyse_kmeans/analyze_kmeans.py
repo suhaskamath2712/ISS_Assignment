@@ -8,35 +8,62 @@ Outputs: prints averages and saves kmeans_avg_time.png
 
 import matplotlib.pyplot as plt
 
-DATA = {
-    # Timings (ms) taken from OpenMP/cluster/output.log (five runs each)
-    1:  [27.744, 27.768, 27.860, 27.598, 27.593],
-    4:  [8.852, 9.075, 8.878, 8.961, 8.843],
-    8:  [5.512, 5.526, 5.650, 5.783, 6.081],
-    16: [4.548, 4.843, 4.680, 4.597, 4.665],
-    32: [3.776, 3.705, 3.668, 3.650, 3.655],
-}
+#Read data from CSV output of output_parallel.csv
+#Returns two 2-D arrays: dynamic_data and static_data
+def read_data():
+    static_data = {}
+    dynamic_data = {}
+    file_path = r"H:\My Drive\Introduction to Scalable Systems\ISS_Assignment\OpenMP\analyse_kmeans\output_parallel.csv"
+    with open(file_path, "r") as f:
+        for line in f:
+            is_dynamic, threads, time_ms = line.strip().split(",")
+
+            
+            threads = int(threads)
+            time_ms = float(time_ms)
+
+            if is_dynamic == "1":
+                if threads not in dynamic_data:
+                    dynamic_data[threads] = []
+                dynamic_data[threads].append(time_ms)
+            else:
+                if threads not in static_data:
+                    static_data[threads] = []
+                static_data[threads].append(time_ms)
+    return dynamic_data, static_data
 
 
 def main():
-    threads = sorted(DATA.keys())
-    avgs = [sum(DATA[t]) / len(DATA[t]) for t in threads]
+    dynamic_data, static_data = read_data()
+    dynamic_threads = sorted(dynamic_data.keys())
+    dynamic_avgs = [sum(dynamic_data[t]) / len(dynamic_data[t]) for t in dynamic_threads]
 
     # Print averages
+    print("Dynamic Schedule Averages:")
     print("Threads, AvgTime_ms, NumRuns")
-    for t, avg in zip(threads, avgs):
-        print(f"{t}, {avg:.3f}, {len(DATA[t])}")
+    for t, avg in zip(dynamic_threads, dynamic_avgs):
+        print(f"{t}, {avg:.3f}, {len(dynamic_data[t])}")
+
+    static_threads = sorted(static_data.keys())
+    static_avgs = [sum(static_data[t]) / len(static_data[t]) for t in static_threads]
+
+    # Print averages
+    print("Static Schedule Averages:")
+    print("Threads, AvgTime_ms, NumRuns")
+    for t, avg in zip(static_threads, static_avgs):
+        print(f"{t}, {avg:.3f}, {len(static_data[t])}")
 
     # Plot
     plt.figure(figsize=(16,9), dpi=300)
-    plt.plot(threads, avgs, "-o")
+    plt.plot(dynamic_threads, dynamic_avgs, "-o", label="Dynamic")
+    plt.plot(static_threads, static_avgs, "-o", label="Static")
     plt.title("K-Means Average Runtime vs Threads")
     plt.xlabel("Threads")
     plt.ylabel("Average Time (ms)")
-    plt.xticks(threads)
+    plt.xticks(dynamic_threads)
     plt.grid(True)
+    plt.legend()
     plt.savefig("kmeans_avg_time.png")
-
 
 if __name__ == "__main__":
     main()

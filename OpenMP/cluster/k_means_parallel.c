@@ -7,7 +7,7 @@
  *   CSV file (no header) with lines:  x,y\n  (both integers). Example:
  *       10,42
  *       -3,17
- *   File path configured via FILE_NAME.
+ *   File path configured via INPUT_FILE.
  *
  * ALGORITHM (LLOYD'S):
  *   1. Initialize K centroids (first K points; can substitute k-means++).
@@ -48,7 +48,10 @@
 #include <omp.h>
 
 // File to read data from 
-#define FILE_NAME "data_20k.csv"
+#define INPUT_FILE "data_20k.csv"
+
+//File to write results to
+#define OUTPUT_FILE "output_parallel.csv"
 
 // Number of clusters 
 #define K 20
@@ -79,13 +82,13 @@ typedef struct {
 } Point;
 
 int number_of_threads = 1; // configurable via argv; passed to OpenMP runtime
+int use_dynamic_schedule = 0; // set to 1 to use dynamic scheduling
 
 /**
  * read_csv
  * ----------------------------------------
  *
  * PARAMETERS:
- * filename  - path to CSV file.
  * points    - out parameter; on success will point to a heap-allocated array of Point.
  *
  * RETURNS:
@@ -97,9 +100,9 @@ int number_of_threads = 1; // configurable via argv; passed to OpenMP runtime
  * ERROR HANDLING:
  * - On fopen failure, prints perror and returns -1.
  */
-int read_csv(const char* filename, Point** points)
+int read_csv(Point** points)
 {
-    FILE* file = fopen(filename, "r");
+    FILE* file = fopen(INPUT_FILE, "r");
 
     if (!file)
     {
@@ -138,10 +141,25 @@ int read_csv(const char* filename, Point** points)
     return size;
 }
 
+//Appends results to output CSV file
+int write_csv(int isDynamic, int threadCount, double elapsed_ms)
+{
+    FILE* file = fopen(OUTPUT_FILE, "a");
+    if (!file) {
+        perror("Could not open output file");
+        return -1;
+    }
+
+    fprintf(file, "%d,%d,%f\n", isDynamic, threadCount, elapsed_ms);
+    fclose(file);
+    return 0;
+}
+
 /**
- * k_means
+ * k_means_static
  * -----------------------------------------------------------------------------
  * Parallel Lloyd's k-means with early stopping (average centroid movement).
+ * Uses static scheduling for better cache locality.
  *
  * PARAMETERS:
  *   points      : array of N points.
@@ -164,7 +182,7 @@ int read_csv(const char* filename, Point** points)
  * RETURNS:
  *   void (centroids & assignments mutated in place).
  */
-void k_means(Point* points, int num_points, Point* centroids, int* assignments)
+void k_means_static(Point* points, int num_points, Point* centroids, int* assignments)
 {
     // Need a place to store old centroids to check for movement
     Point* old_centroids = (Point*)malloc(K * sizeof(Point));
@@ -288,11 +306,162 @@ void k_means(Point* points, int num_points, Point* centroids, int* assignments)
 }
 
 /**
+ * k_means_static
+ * -----------------------------------------------------------------------------
+ * Parallel Lloyd's k-means with early stopping (average centroid movement).
+ * Uses dynamic scheduling for better load balancing.
+ *
+ * PARAMETERS:
+ *   points      : array of N points.
+ *   num_points  : number of points (N).
+ *   centroids   : array[K] (input initial positions, output final positions).
+ *   assignments : array[N] (written each iteration with cluster id per point).
+ *
+ * PARALLEL PHASES:
+ *   1. Assignment      (#pragma omp parallel for) per point nearest centroid.
+ *   2. Accumulation    (#pragma omp parallel) local arrays + critical merge.
+ *   3. Movement reduce (#pragma omp parallel for reduction(+)) total movement.
+ *
+ * COMPLEXITY:
+ *   Time: O(T * N * K / P + T * K * P) approx (P = threads, T iterations).
+ *   Space: O(N + K + K * P) due to per-thread local_sums/local_counts.
+ *
+ * CONVERGENCE:
+ *   Stops early if average movement < EPSILON; else runs to MAX_ITERATIONS.
+ *
+ * RETURNS:
+ *   void (centroids & assignments mutated in place).
+ */
+void k_means_dynamic(Point* points, int num_points, Point* centroids, int* assignments)
+{
+    // Need a place to store old centroids to check for movement
+    Point* old_centroids = (Point*)malloc(K * sizeof(Point));
+    if (!old_centroids) {
+        fprintf(stderr, "Failed to allocate old_centroids\n");
+        return; // Abort clustering
+    }
+
+    for (int iter = 0; iter < MAX_ITERATIONS; iter++) {
+        // Store the current centroid positions before they are updated
+        memcpy(old_centroids, centroids, K * sizeof(Point));
+
+        // ===================== ASSIGNMENT STEP (PARALLEL) =====================
+        // For each point, scan all centroids (K small relative to N). Writes to assignments[i].
+        // No synchronization required (each i unique). Use static scheduling for cache locality.
+        #pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < num_points; i++) {
+            int min_distance = SQUARED_DISTANCE(points[i], centroids[0]);
+            int best = 0;
+            for (int j = 1; j < K; j++) {
+                int distance = SQUARED_DISTANCE(points[i], centroids[j]);
+                if (distance < min_distance) {
+                    min_distance = distance;
+                    best = j;
+                }
+            }
+            assignments[i] = best;
+        }
+
+    // ===================== UPDATE STEP (ALLOC GLOBAL BUFFERS) =====================
+    // Allocate global accumulation arrays (zeroed). We'll also allocate per-thread partials
+    // and perform a contention-free merge afterwards.
+    Point* new_centroids = (Point*)calloc(K, sizeof(Point));
+    int* counts = (int*)calloc(K, sizeof(int));
+
+        if (!new_centroids || !counts)
+        {
+            fprintf(stderr, "Allocation failed during k-means update step\n");
+            free(new_centroids);
+            free(counts);
+            // We must also free old_centroids before returning
+            free(old_centroids); // Ensure all memory is freed on error
+            return; 
+        }
+
+        // ===================== ACCUMULATION STEP (PER-THREAD PARTIALS, NO CRITICAL) =====================
+        int P = omp_get_max_threads();
+        Point* partial_sums = (Point*)calloc((size_t)P * K, sizeof(Point));
+        int* partial_counts = (int*)calloc((size_t)P * K, sizeof(int));
+        if (!partial_sums || !partial_counts) {
+            fprintf(stderr, "Allocation failed for partial arrays\n");
+            free(partial_sums); free(partial_counts);
+            free(new_centroids); free(counts); free(old_centroids);
+            return;
+        }
+
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            Point* ls = &partial_sums[(size_t)tid * K];
+            int* lc = &partial_counts[(size_t)tid * K];
+
+            #pragma omp for schedule(dynamic)
+            for (int i = 0; i < num_points; i++) {
+                int cid = assignments[i];
+                ls[cid].x += points[i].x;
+                ls[cid].y += points[i].y;
+                lc[cid]++;
+            }
+        }
+
+        // Merge partials (single-threaded, no contention)
+        for (int c = 0; c < K; ++c) {
+            long sx = 0, sy = 0; long cnt = 0;
+            for (int t = 0; t < P; ++t) {
+                size_t idx = (size_t)t * K + c;
+                sx  += partial_sums[idx].x;
+                sy  += partial_sums[idx].y;
+                cnt += partial_counts[idx];
+            }
+            new_centroids[c].x = (int)sx;
+            new_centroids[c].y = (int)sy;
+            counts[c] = (int)cnt;
+        }
+        free(partial_sums);
+        free(partial_counts);
+
+        // ===================== CENTROID UPDATE =====================
+        // Compute arithmetic mean; if empty cluster, leave centroid unchanged (no reinit strategy).
+        for (int j = 0; j < K; j++)
+        {
+            if (counts[j] > 0) {
+                centroids[j].x = new_centroids[j].x / counts[j];
+                centroids[j].y = new_centroids[j].y / counts[j];
+            }
+        }
+        
+        // ===================== MOVEMENT CALC (PARALLEL REDUCTION, NO sqrt IN LOOP) =====================
+        // Compute sum of squared movements; compare to K * EPSILON^2 to avoid repeated sqrt.
+        double total_sq = 0.0;
+        #pragma omp parallel for reduction(+:total_sq) schedule(dynamic)
+        for (int j = 0; j < K; j++) {
+            double dx = (double)centroids[j].x - (double)old_centroids[j].x;
+            double dy = (double)centroids[j].y - (double)old_centroids[j].y;
+            total_sq += dx*dx + dy*dy;
+        }
+        
+        // Early stopping: break when average movement below EPSILON threshold.
+        if (total_sq < (double)K * EPSILON * EPSILON) {
+            free(new_centroids);
+            free(counts);
+            break; // Exit the loop early
+        }
+
+        free(new_centroids);
+        free(counts);
+    }
+    
+    // Free the helper array allocated at the start
+    free(old_centroids);
+}
+
+/**
  * main
  * -----------------------------------------------------------------------------
  *
  * STEPS:
  *   1. Parse argv for thread count; set via omp_set_num_threads.
+ *   2. 
  *   2. Read points from CSV.
  *   3. Initialize centroids from first K points (for simplicity).
  *   4. Time k_means via omp_get_wtime (wall clock).
@@ -301,28 +470,39 @@ void k_means(Point* points, int num_points, Point* centroids, int* assignments)
  * RETURNS:
  *   0 on success; 1 on I/O or allocation failure.
  */
-int main(int argc, char** argv)
+float main(int argc, char** argv)
 {
-    if (argc > 1)
+    if (argc < 2)
     {
-        number_of_threads = atoi(argv[1]);
-        if (number_of_threads < 1) number_of_threads = 1;
+        fprintf(stderr, "Usage: %s <number_of_threads> <0|1>\n", argv[0]);
+        return 1;
     }
     
+    number_of_threads = atoi(argv[1]);
+
+    if (number_of_threads < 1)
+    {
+        number_of_threads = 1;
+    }
+
     omp_set_num_threads(number_of_threads);
+
+    use_dynamic_schedule = atoi(argv[2]); // second arg: 0=static, 1=dynamic
 
     double start, end; // wall-clock timing using OpenMP
 
     Point* points = NULL;
-    int num_points = read_csv(FILE_NAME, &points);
+    int num_points = read_csv(&points);
 
-    if (num_points < 0) {
+    if (num_points <= 0)
+    {
         fprintf(stderr, "Error reading points from CSV\n");
         return 1;
     }
 
     // Check if K is too large (simple safeguard)
-    if (num_points < K) {
+    if (num_points < K)
+    {
         fprintf(stderr, "Error: K (%d) is larger than number of points (%d).\n", K, num_points);
         free(points);
         return 1;
@@ -347,16 +527,44 @@ int main(int argc, char** argv)
     //Start clock
     start = omp_get_wtime();
 
-    // Run clustering (MAX_ITERATIONS internally controls loop count).
-    k_means(points, num_points, centroids, assignments);
+    if (use_dynamic_schedule) {
+        k_means_dynamic(points, num_points, centroids, assignments);
+    } else {
+        k_means_static(points, num_points, centroids, assignments);
+    }
     
     //Stop clock
     end = omp_get_wtime();
 
-    printf("K-means clustering completed in %.3f ms using %d thread(s).\n", (end - start) * 1000.0, number_of_threads);
     
+    printf("Final centroids:\n");
+
+    //Print each centroid with the number of points assigned to it
+    for (int i = 0; i < K; i++)
+    {
+        int count = 0;
+        for (int j = 0; j < num_points; j++)
+            if (assignments[j] == i)
+                count++;
+
+        printf("Centroid %d: (%d, %d) with %d points\n", i, centroids[i].x, centroids[i].y, count);
+    }
+
+    float elapsed_ms = (end - start) * 1000;
+
+    if (use_dynamic_schedule)
+        printf("K-means clustering completed in %f ms using %d thread(s) with DYNAMIC scheduling.\n", elapsed_ms, number_of_threads);
+    else
+        printf("K-means clustering completed in %f ms using %d thread(s) with STATIC scheduling.\n", elapsed_ms, number_of_threads);
+
+    printf("----------------------------------------------\n");
+
+    //Write results to CSV
+    write_csv(use_dynamic_schedule, number_of_threads, elapsed_ms);
+
     // Cleanup
     free(assignments);
     free(points);
-    return 0;
+
+    return elapsed_ms;
 }

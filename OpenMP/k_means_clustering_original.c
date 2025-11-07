@@ -7,7 +7,7 @@
  *   CSV file (no header) with lines:  x,y\n  (both integers). Example:
  *       10,42
  *       -3,17
- *   File path configured via FILE_NAME.
+ *   File path configured via INPUT_FILE.
  *
  * ALGORITHM (LLOYD'S):
  *   1. Initialize K centroids (first K points; can substitute k-means++).
@@ -312,7 +312,7 @@ int main(int argc, char** argv)
     double start, end; // wall-clock timing using OpenMP
 
     Point* points = NULL;
-    int num_points = read_csv(FILE_NAME, &points);
+    int num_points = read_csv(INPUT_FILE, &points);
 
     if (num_points < 0) {
         fprintf(stderr, "Error reading points from CSV\n");
