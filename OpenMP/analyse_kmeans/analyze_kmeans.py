@@ -28,14 +28,13 @@ def main():
         print(f"{t}, {avg:.3f}, {len(DATA[t])}")
 
     # Plot
-    plt.figure(figsize=(7, 4.5), dpi=140)
+    plt.figure(figsize=(16,9), dpi=300)
     plt.plot(threads, avgs, "-o")
     plt.title("K-Means Average Runtime vs Threads")
     plt.xlabel("Threads")
     plt.ylabel("Average Time (ms)")
     plt.xticks(threads)
-    plt.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
-    plt.tight_layout()
+    plt.grid(True)
     plt.savefig("kmeans_avg_time.png")
 
 
