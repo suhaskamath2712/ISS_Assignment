@@ -1,0 +1,27 @@
+cc -O2 -Wall -Wextra -pedantic -std=c11 -fopenmp -c k_means_parallel.c -o k_means_parallel.o
+cc -O2 -Wall -Wextra -pedantic -std=c11 -fopenmp k_means_parallel.o -o kmeans_parallel -lm -fopenmp
+K-means clustering completed in 27.744000 ms using 1 thread (sequential).
+K-means clustering completed in 27.768000 ms using 1 thread (sequential).
+K-means clustering completed in 27.860000 ms using 1 thread (sequential).
+K-means clustering completed in 27.598000 ms using 1 thread (sequential).
+K-means clustering completed in 27.593000 ms using 1 thread (sequential).
+K-means clustering completed in 8.852 ms using 4 thread(s).
+K-means clustering completed in 9.075 ms using 4 thread(s).
+K-means clustering completed in 8.878 ms using 4 thread(s).
+K-means clustering completed in 8.961 ms using 4 thread(s).
+K-means clustering completed in 8.843 ms using 4 thread(s).
+K-means clustering completed in 5.512 ms using 8 thread(s).
+K-means clustering completed in 5.526 ms using 8 thread(s).
+K-means clustering completed in 5.650 ms using 8 thread(s).
+K-means clustering completed in 5.783 ms using 8 thread(s).
+K-means clustering completed in 6.081 ms using 8 thread(s).
+K-means clustering completed in 4.548 ms using 16 thread(s).
+K-means clustering completed in 4.843 ms using 16 thread(s).
+K-means clustering completed in 4.680 ms using 16 thread(s).
+K-means clustering completed in 4.597 ms using 16 thread(s).
+K-means clustering completed in 4.665 ms using 16 thread(s).
+K-means clustering completed in 3.776 ms using 32 thread(s).
+K-means clustering completed in 3.705 ms using 32 thread(s).
+K-means clustering completed in 3.668 ms using 32 thread(s).
+K-means clustering completed in 3.650 ms using 32 thread(s).
+K-means clustering completed in 3.655 ms using 32 thread(s).

@@ -1,0 +1,17 @@
+#!/bin/bash
+#SBATCH --job-name=myjob         # Job name
+#SBATCH --nodes=1                # Request 1 node (OpenMP runs on one machine)
+#SBATCH --ntasks=1               # Run 1 task (your program)
+#SBATCH --cpus-per-task=32       # Request 32 CPUs for that 1 task
+#SBATCH --output=output.log      # Output file
+#SBATCH --error=error.log        # Error log file
+
+#Compile, if not already done
+make
+
+#Run 5 times for each thread count
+for i in {1..5}; do ./kmeans_sequential; done            # Run the sequential executable
+for i in {1..5}; do ./kmeans_parallel 4; done            # Run the OpenMP executable with 4 threads
+for i in {1..5}; do ./kmeans_parallel 8; done            # Run the OpenMP executable with 8 threads
+for i in {1..5}; do ./kmeans_parallel 16; done           # Run the OpenMP executable with 16 threads
+for i in {1..5}; do ./kmeans_parallel 32; done           # Run the OpenMP executable with 32 threads
