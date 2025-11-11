@@ -1,0 +1,40 @@
+#!/bin/bash
+#SBATCH --job-name=mpi-spmv-SINGLE-NODE # Job name
+#SBATCH --nodes=1                   # Request ONLY 1 node
+#SBATCH --ntasks-per-node=32        # Request 32 processes on that 1 node
+#SBATCH --output=scaling-job-%j.log  # Output file
+#SBATCH --error=scaling-job-%j.err   # Error log file
+#SBATCH --time=00:20:00             # 20-minute time limit
+
+# 1. Force Re-compilation (always a good idea)
+echo "--- Forcing Re-compilation ---"
+make clean
+make || exit 1  # Stop if compilation fails
+echo "--- Compilation Complete ---"
+
+
+# 2. Run Serial Test (5x for average)
+echo "--- Running Serial (5x) ---"
+for i in {1..5}
+do
+    # Use srun for a single, non-MPI task
+    srun -n 1 ./main 0
+done
+
+
+# 3. Run Parallel Scaling Tests (Single Node)
+echo "--- Running Parallel Scaling (on 1 Node) ---"
+
+# We can't use 64 or 128, as we only have 32 cores on this node
+for process_count in 8 16 32
+do
+    echo "--- Testing with $process_count processes (5x) ---"
+    for i in {1..5}
+    {
+        # mpiexec will run all processes on this single node,
+        # which we know works.
+        mpiexec -n $process_count ./main 1
+    }
+done
+
+echo "--- Job Complete ---"

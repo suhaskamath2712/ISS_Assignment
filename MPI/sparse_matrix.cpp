@@ -26,8 +26,8 @@ bool load_matrix(const std::string& filename, CSRMatrix& matrix) {
     
     file.close();
     
-    std::cout << "Matrix loaded: " << matrix.n << "x" << matrix.n 
-              << ", nnz = " << matrix.nnz << std::endl;
+    //std::cout << "Matrix loaded: " << matrix.n << "x" << matrix.n 
+    //          << ", nnz = " << matrix.nnz << std::endl;
     return true;
 }
 
@@ -49,7 +49,7 @@ bool load_vector(const std::string& filename, std::vector<double>& vec) {
     
     file.close();
     
-    std::cout << "Vector loaded: size = " << n << std::endl;
+    //std::cout << "Vector loaded: size = " << n << std::endl;
     return true;
 }
 
