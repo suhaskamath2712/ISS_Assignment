@@ -1,0 +1,29 @@
+Sparse matrix-vector multiplication using MPI (5 points)
+
+Write a MPI-based sparse matrix-vector multiplication. For this program,
+use the sparse matrix from SparseSuite  that is set up in a common area
+on the teaching cluster. The sparse matrix is a 27,993,600 x 27,993,600
+matrix with 760,648,352 non-zeros that are real numbers.
+
+Execute the following commands
+>> bash /scratch/public/sparse_matrix_data/setup.sh
+>> make test
+The first command will generate a couple of cpp files, header file and
+Makefile. Go through the main.cpp for an example on how to load the matrix
+and vector. The second command is for compiling the program.
+
+Your parallel program should be written in a way to attempt to load balance
+the computations across the processes. Run your parallel matrix-multiplication
+program with 8, 16, 32, 64 and 128 processes. For each experiment with a fixed
+number of threads, and for the sequential program, run 5 times, and obtain the
+average execution time across these 5 runs.
+
+Prepare a report containing:
+•     Methodology
+•     Experimental setup
+•     Results
+•     Give observations on each of these results.
+
+o     For each process run (8, 16, etc.), show the execution times and speedups when compared to single-process execution, both as tables and graphs.
+o     For each process run (8, 16, etc.), find the measure of load imbalance as (maximum time spent by a process – minimum time spent by a process) / (minimum time spent by a process). For measuring these times, find the time spent only on the computations by each process. Plot these load imbalance measures.
+o     For the 64-process execution, plot the computation times spent on each of the 64 processes.
