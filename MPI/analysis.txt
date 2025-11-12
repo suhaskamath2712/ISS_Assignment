@@ -1,0 +1,57 @@
+--- Performance Analysis ---
+
+=== Average Computation Time & Load Imbalance (across 5 runs) ===
+
+Processes: 1   | Avg. Time:   373.21 ms
+
+Processes: 8   | Avg. Time:    81.07 ms
+  Load Imbalance Factor (per run):
+    Run 1:  0.0002 (Max: 81.60 ms, Min: 81.59 ms)
+    Run 2:  0.0001 (Max: 81.26 ms, Min: 81.25 ms)
+    Run 3:  0.0001 (Max: 81.51 ms, Min: 81.51 ms)
+    Run 4:  0.0001 (Max: 79.94 ms, Min: 79.93 ms)
+    Run 5:  0.0001 (Max: 81.03 ms, Min: 81.02 ms)
+
+Processes: 16  | Avg. Time:    62.54 ms
+  Load Imbalance Factor (per run):
+    Run 1:  0.0002 (Max: 62.95 ms, Min: 62.94 ms)
+    Run 2:  0.0003 (Max: 62.58 ms, Min: 62.56 ms)
+    Run 3:  0.0004 (Max: 62.50 ms, Min: 62.47 ms)
+    Run 4:  0.0003 (Max: 62.55 ms, Min: 62.53 ms)
+    Run 5:  0.0002 (Max: 62.12 ms, Min: 62.11 ms)
+
+Processes: 32  | Avg. Time:    59.82 ms
+  Load Imbalance Factor (per run):
+    Run 1:  0.0005 (Max: 59.34 ms, Min: 59.31 ms)
+    Run 2:  0.0006 (Max: 59.60 ms, Min: 59.57 ms)
+    Run 3:  0.0006 (Max: 60.27 ms, Min: 60.23 ms)
+    Run 4:  0.0007 (Max: 60.40 ms, Min: 60.36 ms)
+    Run 5:  0.0004 (Max: 59.49 ms, Min: 59.47 ms)
+
+Processes: 64  | Avg. Time:    63.65 ms
+  Load Imbalance Factor (per run):
+    Run 1:  0.0010 (Max: 63.54 ms, Min: 63.47 ms)
+    Run 2:  0.0012 (Max: 63.46 ms, Min: 63.39 ms)
+    Run 3:  0.0010 (Max: 63.74 ms, Min: 63.67 ms)
+    Run 4:  0.0013 (Max: 63.65 ms, Min: 63.57 ms)
+    Run 5:  0.0018 (Max: 63.89 ms, Min: 63.77 ms)
+
+Processes: 128 | Avg. Time:    82.73 ms
+  Load Imbalance Factor (per run):
+    Run 1:  4.0871 (Max: 73.24 ms, Min: 14.40 ms)
+    Run 2:  4.2291 (Max: 66.23 ms, Min: 12.67 ms)
+    Run 3:  3.3781 (Max: 96.89 ms, Min: 22.13 ms)
+    Run 4:  1.3478 (Max: 111.45 ms, Min: 47.47 ms)
+    Run 5:  3.3187 (Max: 65.85 ms, Min: 15.25 ms)
+
+=== Speedup vs. Serial (Based on Avg. Time) ===
+Serial (1 proc):   373.21 ms (1.00x)
+Parallel (8   procs):    81.07 ms ( 4.60x)
+Parallel (16  procs):    62.54 ms ( 5.97x)
+Parallel (32  procs):    59.82 ms ( 6.24x)
+Parallel (64  procs):    63.65 ms ( 5.86x)
+Parallel (128 procs):    82.73 ms ( 4.51x)
+
+Saved plot: plot_execution_time.png
+Saved plot: plot_load_imbalance.png
+Saved plot: plot_64_process_rank_times.png
