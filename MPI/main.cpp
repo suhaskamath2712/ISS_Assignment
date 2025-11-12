@@ -2,8 +2,8 @@
 ================================================================================
 Sparse Matrix-Vector Multiplication (SpMV) with MPI Parallelization
 ================================================================================
-This version outputs the results in CSV format:
-number_of_processes,computation_time_ms
+This version outputs per-process computation times in CSV format:
+#,number_of_processes,rank_of_process,computation_time_ms
 ================================================================================
 */
 
@@ -72,8 +72,8 @@ int serial()
     // Use floating-point milliseconds for precision
     chrono::duration<double, milli> duration_ms = end - start;
 
-    // Print CSV format: number_of_processes,computation_time_ms
-    cout << "1," << duration_ms.count() << endl;
+    // Print CSV format: #,no_of_processes,rank_of_process,computation_time_of_process
+    cout << "#,1,0," << duration_ms.count() << endl;
 
     return 0;
 }
@@ -245,12 +245,11 @@ int mpi(int argc, char** argv)
 
 
     // --- Print Timings ---
-    if (rank == 0)
-    {
-        double comp_ms = (t1_comp - t0_comp) * 1000.0;
-        // Print CSV format: number_of_processes,computation_time_ms
-        cout << size << "," << comp_ms << endl;
-    }
+    // All processes calculate and print their own computation time.
+    double comp_ms = (t1_comp - t0_comp) * 1000.0;
+    
+    // Print CSV format: #,no_of_processes,rank_of_process,computation_time_of_process
+    cout << size << "," << rank << "," << comp_ms << endl;
 
     MPI_Finalize();
     return 0;
