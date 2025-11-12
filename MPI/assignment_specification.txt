@@ -8,6 +8,7 @@ matrix with 760,648,352 non-zeros that are real numbers.
 Execute the following commands
 >> bash /scratch/public/sparse_matrix_data/setup.sh
 >> make test
+
 The first command will generate a couple of cpp files, header file and
 Makefile. Go through the main.cpp for an example on how to load the matrix
 and vector. The second command is for compiling the program.
@@ -24,6 +25,12 @@ Prepare a report containing:
 •     Results
 •     Give observations on each of these results.
 
-o     For each process run (8, 16, etc.), show the execution times and speedups when compared to single-process execution, both as tables and graphs.
-o     For each process run (8, 16, etc.), find the measure of load imbalance as (maximum time spent by a process – minimum time spent by a process) / (minimum time spent by a process). For measuring these times, find the time spent only on the computations by each process. Plot these load imbalance measures.
-o     For the 64-process execution, plot the computation times spent on each of the 64 processes.
+For each process run (8, 16, etc.), show the execution times and speedups when
+compared to single-process execution, both as tables and graphs.
+
+For each process run (8, 16, etc.), find the measure of load imbalance as
+(maximum time spent by a process – minimum time spent by a process) / (minimum time spent by a process).
+For measuring these times, find the time spent only on the computations by each
+process. Plot these load imbalance measures.
+
+For the 64-process execution, plot the computation times spent on each of the 64 processes.
