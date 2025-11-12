@@ -2,8 +2,25 @@
 ================================================================================
 Sparse Matrix-Vector Multiplication (SpMV) with MPI Parallelization
 ================================================================================
-Arguments:
-    argv[1]: 0 = serial (default), 1 = mpi
+This version implements Parallel I/O to overcome the Rank 0 bottleneck.
+
+How It Works (MPI Mode):
+------------------------
+1.  [Phase 1: Metadata] Rank 0 loads ONLY the small metadata (n, nnz,
+    and the full row_ptr array) and the vector x.
+2.  [Phase 1: Broadcast] Rank 0 broadcasts this metadata to all processes.
+3.  [Phase 2: Partition] All processes (in parallel) use the full row_ptr
+    array to determine which rows they are responsible for and calculate
+    the exact file offsets for their data.
+4.  [Phase 3: Parallel I/O] All processes open the matrix file, seek to
+    their specific offset, and read ONLY their required portions of
+    col_idx and values.
+5.  [Phase 4: Compute] All processes compute their local SpMV.
+6.  [Phase 5: Gather] Results are gathered on the root.
+
+This "hybrid" parallel I/O approach avoids the main bottleneck by
+parallelizing the slow, heavy I/O (reading col_idx and values) while
+keeping the logic simple for the small metadata.
 ================================================================================
 */
 
@@ -13,6 +30,7 @@ Arguments:
 #include <chrono>
 #include <algorithm>
 #include <numeric>
+#include <fstream> // Needed for file I/O in parallel
 #include <mpi.h>
 
 using namespace std;
@@ -41,7 +59,7 @@ int main(int argc, char** argv)
     return serial();
 }
 
-// Serial driver implementation
+// Serial driver implementation (Unchanged)
 int serial()
 {
     CSRMatrix A;
@@ -59,8 +77,6 @@ int serial()
     }
 
     y.resize(A.n, 0.0);
-
-    cout << "Mode: Serial" << endl;
     auto start = chrono::high_resolution_clock::now();
     
     for (int i = 0; i < A.n; i++) {
@@ -77,8 +93,7 @@ int serial()
     return 0;
 }
 
-// Build a contiguous row partition that balances by nonzeros.
-// Returns row_starts of size (P+1) where rows in [row_starts[r], row_starts[r+1]) go to rank r
+// Build a contiguous row partition that balances by nonzeros. (Unchanged)
 static vector<int> build_row_partition_by_nnz(const CSRMatrix& A, int P)
 {
     vector<long long> row_nnz(A.n);
@@ -110,7 +125,9 @@ static vector<int> build_row_partition_by_nnz(const CSRMatrix& A, int P)
     return starts;
 }
 
-// MPI-based distributed sparse matrix-vector multiplication
+// =========================================================================
+// NEW MPI IMPLEMENTATION WITH PARALLEL I/O
+// =========================================================================
 int mpi(int argc, char** argv)
 {
     MPI_Init(&argc, &argv); 
@@ -119,141 +136,123 @@ int mpi(int argc, char** argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size); 
 
+    CSRMatrix A;       // This will hold each process's *local* matrix
+    vector<double> x;  // The full input vector
+    int n = 0, nnz = 0;
+    vector<int> full_row_ptr; // The full row_ptr array, needed by all
+
+    // --- Phase 1: Root reads/broadcasts metadata and vector ---
     if (rank == 0) {
-        cout << "Mode: MPI (running on " << size << " processes)" << endl;
-    }
-
-    CSRMatrix A; 
-    vector<double> x; 
-    int n = 0; 
-    vector<int> row_starts; 
-
-    double t0_total = MPI_Wtime(); 
-
-    struct RankData {
-        int rs, re, rows, lnnz;
-        vector<int> lrp;
-    };
-    
-    vector<RankData> all_rank_data;
-    vector<MPI_Request> send_requests;
-
-    if (rank == 0)
-    {
-        if (!load_matrix(matrix_file, A)) {
-            cerr << "Failed to load matrix." << endl;
+        ifstream file(matrix_file, ios::binary);
+        if (!file.is_open()) {
+            cerr << "Root failed to open matrix file." << endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
         }
+        file.read(reinterpret_cast<char*>(&n), sizeof(int));
+        file.read(reinterpret_cast<char*>(&nnz), sizeof(int));
         
+        full_row_ptr.resize(n + 1);
+        file.read(reinterpret_cast<char*>(full_row_ptr.data()), (n + 1) * sizeof(int));
+        file.close();
+
+        // Root also loads the full vector
         if (!load_vector(vector_file, x)) {
-            cerr << "Failed to load vector." << endl;
+            cerr << "Root failed to load vector." << endl;
             MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        
-        if ((int)x.size() != A.n) {
-            cerr << "Vector length does not match matrix dimension" << endl;
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        
-        n = A.n;
-        row_starts = build_row_partition_by_nnz(A, size); 
-        all_rank_data.resize(size);
-
-        for (int r = 0; r < size; ++r) {
-            auto& data = all_rank_data[r]; 
-            data.rs = row_starts[r];
-            data.re = row_starts[r+1];
-            data.rows = data.re - data.rs;
-            int base = A.row_ptr[data.rs];
-            data.lnnz = A.row_ptr[data.re] - base;
-
-            data.lrp.resize(data.rows + 1);
-            for (int i = 0; i <= data.rows; ++i) {
-                data.lrp[i] = A.row_ptr[data.rs + i] - base;
-            }
         }
     }
 
+    // Broadcast metadata to all processes
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&nnz, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    if (n <= 0)
-    {
-        if (rank == 0) cerr << "Invalid matrix size" << endl;
+    // Resize vectors on non-root ranks before broadcast
+    if (rank != 0) full_row_ptr.resize(n + 1);
+    if (rank != 0) x.resize(n);
+
+    MPI_Bcast(full_row_ptr.data(), n + 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(x.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    if (n <= 0) {
+        if (rank == 0) cerr << "Invalid matrix size." << endl;
         MPI_Finalize();
         return 1;
     }
 
-    if (rank != 0) x.resize(n);
-    MPI_Bcast(x.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-    int local_row_start = 0, local_row_end = 0;
-    int local_n = 0, local_nnz = 0;
-    vector<int> local_row_ptr;
-    vector<int> local_col_idx;
-    vector<double> local_values;
-
-    if (rank == 0) {
-        for (int r = 1; r < size; ++r) { 
-            auto& data = all_rank_data[r]; 
-            int base = A.row_ptr[data.rs];
-            
-            size_t start_req_idx = send_requests.size();
-            send_requests.resize(start_req_idx + 7);
-
-            MPI_Isend(&data.rs, 1, MPI_INT, r, 100, MPI_COMM_WORLD, &send_requests[start_req_idx + 0]);
-            MPI_Isend(&data.re, 1, MPI_INT, r, 101, MPI_COMM_WORLD, &send_requests[start_req_idx + 1]);
-            MPI_Isend(&data.rows, 1, MPI_INT, r, 102, MPI_COMM_WORLD, &send_requests[start_req_idx + 2]);
-            MPI_Isend(&data.lnnz, 1, MPI_INT, r, 103, MPI_COMM_WORLD, &send_requests[start_req_idx + 3]);
-            MPI_Isend(data.lrp.data(), data.rows + 1, MPI_INT, r, 104, MPI_COMM_WORLD, &send_requests[start_req_idx + 4]);
-            MPI_Isend(A.col_idx.data() + base, data.lnnz, MPI_INT, r, 105, MPI_COMM_WORLD, &send_requests[start_req_idx + 5]);
-            MPI_Isend(A.values.data() + base, data.lnnz, MPI_DOUBLE, r, 106, MPI_COMM_WORLD, &send_requests[start_req_idx + 6]);
-        }
-
-        auto& data = all_rank_data[0];
-        int base = A.row_ptr[data.rs];
-        local_row_start = data.rs;
-        local_row_end = data.re;
-        local_n = data.rows;
-        local_nnz = data.lnnz;
-        // global_row_offset = data.rs;  <-- REMOVED
-        local_row_ptr = std::move(data.lrp); 
-        local_col_idx.assign(A.col_idx.begin() + base, A.col_idx.begin() + base + data.lnnz);
-        local_values.assign(A.values.begin() + base, A.values.begin() + base + data.lnnz);
-    }
-    else
-    {
-        MPI_Recv(&local_row_start, 1, MPI_INT, 0, 100, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&local_row_end, 1, MPI_INT, 0, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&local_n, 1, MPI_INT, 0, 102, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(&local_nnz, 1, MPI_INT, 0, 103, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        // global_row_offset = local_row_start; <-- REMOVED
-
-        local_row_ptr.resize(local_n + 1);
-        local_col_idx.resize(local_nnz);
-        local_values.resize(local_nnz);
-        MPI_Recv(local_row_ptr.data(), local_n + 1, MPI_INT, 0, 104, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(local_col_idx.data(), local_nnz, MPI_INT, 0, 105, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(local_values.data(), local_nnz, MPI_DOUBLE, 0, 106, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
+    // --- Phase 2: Parallel Partitioning ---
+    // All processes do this in parallel, since all have the full_row_ptr
     
-    if (rank == 0 && !send_requests.empty())
-        MPI_Waitall(send_requests.size(), send_requests.data(), MPI_STATUSES_IGNORE);
+    // Create a temporary "metadata" matrix to feed the partitioner
+    CSRMatrix A_meta;
+    A_meta.n = n;
+    A_meta.nnz = nnz;
+    A_meta.row_ptr = full_row_ptr; // vector copy
+    
+    vector<int> row_starts = build_row_partition_by_nnz(A_meta, size);
+    
+    int local_row_start = row_starts[rank];
+    int local_row_end = row_starts[rank+1];
+    int local_n = local_row_end - local_row_start;
 
+    // These are the key values for parallel I/O
+    int global_nnz_offset = full_row_ptr[local_row_start];
+    int local_nnz = full_row_ptr[local_row_end] - global_nnz_offset;
+
+    // --- Phase 3: Parallel I/O ---
+
+    // Calculate file offsets
+    // [n] [nnz] [row_ptr data] [col_idx data] [values data]
+    long long col_idx_file_start = (long long)sizeof(int) * 2 + (long long)sizeof(int) * (n + 1);
+    long long values_file_start = col_idx_file_start + (long long)sizeof(int) * nnz;
+
+    ifstream file(matrix_file, ios::binary);
+    if (!file.is_open()) {
+        cerr << "Rank " << rank << " failed to open matrix file." << endl;
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    // --- Read local col_idx ---
+    A.col_idx.resize(local_nnz);
+    long long my_col_seek = col_idx_file_start + (long long)sizeof(int) * global_nnz_offset;
+    file.seekg(my_col_seek);
+    file.read(reinterpret_cast<char*>(A.col_idx.data()), local_nnz * sizeof(int));
+    
+    // --- Read local values ---
+    A.values.resize(local_nnz);
+    long long my_val_seek = values_file_start + (long long)sizeof(double) * global_nnz_offset;
+    file.seekg(my_val_seek);
+    file.read(reinterpret_cast<char*>(A.values.data()), local_nnz * sizeof(double));
+
+    file.close();
+
+    // --- Fix up the local row_ptr ---
+    // We need to build a local, 0-based row_ptr for our chunk
+    A.n = local_n;
+    A.nnz = local_nnz;
+    A.row_ptr.resize(local_n + 1);
+    for (int i = 0; i <= local_n; ++i) {
+        A.row_ptr[i] = full_row_ptr[local_row_start + i] - global_nnz_offset;
+    }
+
+    // --- Phase 4: Compute ---
+    // This is the same compute kernel as before
     vector<double> y_local(local_n, 0.0);
-    double t0_comp = MPI_Wtime(); // <-- Timer start
+    double t0_comp = MPI_Wtime(); // Start computation timer
     if (local_n > 0) {
         for (int i = 0; i < local_n; ++i) {
             double sum = 0.0;
-            int row_begin = local_row_ptr[i];
-            int row_end = local_row_ptr[i+1];
+            int row_begin = A.row_ptr[i];
+            int row_end = A.row_ptr[i+1];
             for (int jj = row_begin; jj < row_end; ++jj) {
-                sum += local_values[jj] * x[local_col_idx[jj]];
+                sum += A.values[jj] * x[A.col_idx[jj]];
             }
             y_local[i] = sum;
         }
     }
-    double t1_comp = MPI_Wtime(); // <-- Timer end
+    double t1_comp = MPI_Wtime(); // Stop computation timer
 
+    // --- Phase 5: Gather Results ---
+    // This logic is unchanged from your previous working version
     vector<int> recv_counts, recv_displs;
     int my_rows = local_n;
     if (rank == 0) recv_counts.resize(size);
@@ -261,7 +260,7 @@ int mpi(int argc, char** argv)
                (rank == 0 ? recv_counts.data() : nullptr), 1, MPI_INT,
                0, MPI_COMM_WORLD);
 
-    vector<double> y; 
+    vector<double> y; // full result on root
     if (rank == 0) {
         recv_displs.resize(size, 0);
         for (int r = 1; r < size; ++r) recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
@@ -273,14 +272,14 @@ int mpi(int argc, char** argv)
                 (rank == 0 ? recv_displs.data() : nullptr), MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
 
-    double t1_total = MPI_Wtime();
 
+    // --- Print Timings ---
     if (rank == 0)
     {
-        double total_ms = (t1_total - t0_total) * 1000.0;
-        cout << "Total elapsed: " << total_ms << " ms." << endl;
-        // --- FIX: Print the computation time ---
-        cout << "  (Computation time: " << (t1_comp - t0_comp) * 1000.0 << " ms)" << endl;
+        cout << "--------------------------------------------------" << endl;
+        double comp_ms = (t1_comp - t0_comp) * 1000.0;
+        cout << "Number of processes: " << size << endl;
+        cout << "Computation time: " << comp_ms << " ms)" << endl;
     }
 
     MPI_Finalize();
