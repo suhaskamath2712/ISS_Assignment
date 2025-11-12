@@ -1,18 +1,26 @@
 Parallelization of KMeans Clustering using OpenMP (5 points)
 
-Explore and write a sequential program for K-Means clustering, where the input data is a set of 2D (x,y) data points given in the link below.
+Explore and write a sequential program for K-Means clustering, where
+the input data is a set of 2D (x,y) data points given in the link below.
 
 Parallelize the loops of the clustering using OpenMP.
 
-Perform experiments comparing the execution time of OpenMP and the sequential codes. For this assignment, we will use K=20 for the number of clusters. Your program should output 20 lines, each for a cluster formed, containing the fields: cluster index, number of points in the cluster and centroid of the points in the cluster.. Perform the following explorations:
+Perform experiments comparing the execution time of OpenMP and the
+sequential codes. For this assignment, we will use K=20 for the number
+of clusters. Your program should output 20 lines, each for a cluster
+formed, containing the fields: cluster index, number of points in the
+cluster and centroid of the points in the cluster.. Perform the following
+explorations:
 
 Static vs dynamic schedule clause in OpenMP for loop
 Perform experiments for OpemMP threads - 4, 8, 16 and 32.
 
-For each experiment with a fixed number of threads, and for the sequential program, run 5 times, and obtain the average execution time across these 5 runs.
+For each experiment with a fixed number of threads, and for the sequential
+program, run 5 times, and obtain the average execution time across these 5 runs.
 
 Prepare a report containing:
 Methodology
 Experimental setup
-Results containing execution times and speedup with the above options, both as tables and graphs with x and y axes properly labeled.
+Results containing execution times and speedup with the above options,
+both as tables and graphs with x and y axes properly labeled.
 Observations.
