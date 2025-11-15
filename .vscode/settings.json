@@ -2,7 +2,8 @@
     "files.associations": {
         "vector": "cpp",
         "ostream": "cpp",
-        "iostream": "cpp"
+        "iostream": "cpp",
+        "ratio": "cpp"
     },
     "python-envs.pythonProjects": []
 }
